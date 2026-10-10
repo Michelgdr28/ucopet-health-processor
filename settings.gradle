@@ -1,0 +1,6 @@
+plugins {
+	// Igual que ucopetapi: deja que Gradle consiga solo el JDK 25 si no esta instalado.
+	id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'ucopet-health-processor'
