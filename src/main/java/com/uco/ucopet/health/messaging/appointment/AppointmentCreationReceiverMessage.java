@@ -1,6 +1,6 @@
 package com.uco.ucopet.health.messaging.appointment;
 
-import com.uco.ucopet.health.dto.appointment.AppointmentMessage;
+import com.uco.ucopet.health.domain.appointment.AppointmentDomain;
 import com.uco.ucopet.health.service.appointment.AppointmentService;
 import com.uco.ucopet.health.util.gson.MapperJsonObject;
 import org.slf4j.Logger;
@@ -34,7 +34,7 @@ public class AppointmentCreationReceiverMessage {
         final String json = new String(message.getBody(), StandardCharsets.UTF_8);
         log.info("[APPOINTMENT-SAVE] recibido idMensaje={}", idMessage);
 
-        final AppointmentMessage appointment = mapperJsonObject.execute(json, AppointmentMessage.class)
+        final AppointmentDomain appointment = mapperJsonObject.execute(json, AppointmentDomain.class)
                 .orElseThrow(() -> new AmqpRejectAndDontRequeueException(
                         "El mensaje no es el JSON de una cita: " + json));
 

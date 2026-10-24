@@ -1,6 +1,6 @@
 package com.uco.ucopet.health.messaging.appointment;
 
-import com.uco.ucopet.health.dto.appointment.AppointmentMessage;
+import com.uco.ucopet.health.domain.appointment.AppointmentDomain;
 import com.uco.ucopet.health.service.appointment.AppointmentService;
 import com.uco.ucopet.health.util.gson.MapperJsonObject;
 import org.slf4j.Logger;
@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 
 // Receptor de la cola de cambio de estado de citas (cancelar, confirmar, completar).
 // Las citas no tienen "activo/inactivo": su equivalente es el estado, por eso esta cola lo cambia.
+// El mensaje solo trae id, status y cancellationReason; el resto de campos llega en null.
 @Component
 public class AppointmentDeactivationReceiverMessage {
 
@@ -34,7 +35,7 @@ public class AppointmentDeactivationReceiverMessage {
         final String json = new String(message.getBody(), StandardCharsets.UTF_8);
         log.info("[APPOINTMENT-DEACTIVATE] recibido idMensaje={}", idMessage);
 
-        final AppointmentMessage appointment = mapperJsonObject.execute(json, AppointmentMessage.class)
+        final AppointmentDomain appointment = mapperJsonObject.execute(json, AppointmentDomain.class)
                 .orElseThrow(() -> new AmqpRejectAndDontRequeueException(
                         "El mensaje no es el JSON de una cita: " + json));
 
