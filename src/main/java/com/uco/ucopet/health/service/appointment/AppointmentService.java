@@ -3,7 +3,6 @@ package com.uco.ucopet.health.service.appointment;
 import com.uco.ucopet.health.domain.appointment.AppointmentDomain;
 import com.uco.ucopet.health.domain.reference.AppointmentTypeReferenceDomain;
 import com.uco.ucopet.health.domain.reference.PetReferenceDomain;
-import com.uco.ucopet.health.dto.appointment.AppointmentMessage;
 import com.uco.ucopet.health.repository.appointment.IAppointmentRepository;
 import com.uco.ucopet.health.repository.reference.IAppointmentTypeReferenceRepository;
 import com.uco.ucopet.health.repository.reference.IDoctorReferenceRepository;
@@ -15,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.Locale;
 import java.util.Optional;
@@ -65,23 +65,28 @@ public class AppointmentService {
 
     // CREATE y UPDATE llegan por la misma cola: si el id no existe se crea; si existe se actualiza.
     // Como el PUT de la API, un update reemplaza todos los campos de la cita.
+    // "incoming" es la cita que llego en el mensaje (no es la que se guarda: sus datos se copian).
     @Transactional
-    public void saveAppointment(final AppointmentMessage message) {
-        if (message == null || message.getId() == null) {
+    public void saveAppointment(final AppointmentDomain incoming) {
+        if (incoming == null || incoming.getId() == null) {
             throw new IllegalArgumentException("El mensaje no trae el id de la cita.");
         }
 
-        final Optional<AppointmentDomain> existing = appointmentRepository.findById(message.getId());
+        final Optional<AppointmentDomain> existing = appointmentRepository.findById(incoming.getId());
         final String previousStatus = existing.map(AppointmentDomain::getStatus).orElse(null);
 
-        validateSchedule(message);
-        final String status = validateStatusRules(message.getStatus(), message.getCancellationReason(),
+        validateSchedule(incoming);
+        final String status = validateStatusRules(incoming.getStatus(), incoming.getCancellationReason(),
                 previousStatus);
-        validateRelationships(message);
-        validateDoctorAvailability(message, existing.isPresent());
+        validateRelationships(incoming);
+        // Una cita cancelada no ocupa el horario del medico, asi que no compite por el.
+        if (!CANCELLED_STATUS.equals(status)) {
+            validateDoctorAvailability(incoming.getDoctorId(), incoming.getAppointmentDate(),
+                    incoming.getAppointmentTime(), existing.isPresent() ? incoming.getId() : null);
+        }
 
         final AppointmentDomain appointment = existing.orElseGet(AppointmentDomain::new);
-        applyMessage(appointment, message, status);
+        copyData(appointment, incoming, status);
         appointmentRepository.save(appointment);
         log.info("[APPOINTMENT] {} id={}", existing.isPresent() ? "actualizada" : "creada", appointment.getId());
     }
@@ -96,7 +101,15 @@ public class AppointmentService {
         final AppointmentDomain appointment = appointmentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("No existe una cita con id: " + id));
 
-        final String normalizedStatus = validateStatusRules(status, cancellationReason, appointment.getStatus());
+        final String previousStatus = appointment.getStatus();
+        final String normalizedStatus = validateStatusRules(status, cancellationReason, previousStatus);
+
+        // Si la cita estaba cancelada su horario pudo ser tomado por otra: al reactivarla se revisa de nuevo.
+        if (CANCELLED_STATUS.equals(previousStatus) && !CANCELLED_STATUS.equals(normalizedStatus)) {
+            validateDoctorAvailability(appointment.getDoctorId(), appointment.getAppointmentDate(),
+                    appointment.getAppointmentTime(), appointment.getId());
+        }
+
         appointment.setStatus(normalizedStatus);
         appointment.setCancellationReason(CANCELLED_STATUS.equals(normalizedStatus)
                 ? cancellationReason.trim()
@@ -105,29 +118,28 @@ public class AppointmentService {
         log.info("[APPOINTMENT] estado actualizado id={} status={}", id, normalizedStatus);
     }
 
-    private void applyMessage(final AppointmentDomain appointment, final AppointmentMessage message,
-                              final String status) {
-        appointment.setId(message.getId());
-        appointment.setTutorId(message.getTutorId());
-        appointment.setPetId(message.getPetId());
-        appointment.setDoctorId(message.getDoctorId());
-        appointment.setAppointmentTypeId(message.getAppointmentTypeId());
-        appointment.setAppointmentDate(message.getAppointmentDate());
-        appointment.setAppointmentTime(message.getAppointmentTime());
-        appointment.setStatus(status);
-        appointment.setCancellationReason(CANCELLED_STATUS.equals(status)
-                ? message.getCancellationReason().trim()
+    private void copyData(final AppointmentDomain target, final AppointmentDomain source, final String status) {
+        target.setId(source.getId());
+        target.setTutorId(source.getTutorId());
+        target.setPetId(source.getPetId());
+        target.setDoctorId(source.getDoctorId());
+        target.setAppointmentTypeId(source.getAppointmentTypeId());
+        target.setAppointmentDate(source.getAppointmentDate());
+        target.setAppointmentTime(source.getAppointmentTime());
+        target.setStatus(status);
+        target.setCancellationReason(CANCELLED_STATUS.equals(status)
+                ? source.getCancellationReason().trim()
                 : null);
     }
 
-    private void validateSchedule(final AppointmentMessage message) {
-        if (message.getAppointmentDate() == null) {
+    private void validateSchedule(final AppointmentDomain appointment) {
+        if (appointment.getAppointmentDate() == null) {
             throw new IllegalArgumentException("La fecha de la cita es obligatoria");
         }
-        if (message.getAppointmentDate().isBefore(LocalDate.now(APPLICATION_ZONE_ID))) {
+        if (appointment.getAppointmentDate().isBefore(LocalDate.now(APPLICATION_ZONE_ID))) {
             throw new IllegalArgumentException("La fecha de la cita no puede estar en el pasado");
         }
-        if (message.getAppointmentTime() == null) {
+        if (appointment.getAppointmentTime() == null) {
             throw new IllegalArgumentException("La hora de la cita es obligatoria");
         }
     }
@@ -161,10 +173,10 @@ public class AppointmentService {
         return status;
     }
 
-    private void validateRelationships(final AppointmentMessage message) {
-        validateDoctor(message.getDoctorId());
-        validateTutorAndPet(message.getTutorId(), message.getPetId());
-        validateAppointmentType(message.getAppointmentTypeId());
+    private void validateRelationships(final AppointmentDomain appointment) {
+        validateDoctor(appointment.getDoctorId());
+        validateTutorAndPet(appointment.getTutorId(), appointment.getPetId());
+        validateAppointmentType(appointment.getAppointmentTypeId());
     }
 
     private void validateDoctor(final UUID doctorId) {
@@ -206,17 +218,15 @@ public class AppointmentService {
         }
     }
 
-    private void validateDoctorAvailability(final AppointmentMessage message, final boolean isUpdate) {
-        final boolean scheduleTaken = isUpdate
-                ? appointmentRepository.existsByDoctorIdAndAppointmentDateAndAppointmentTimeAndIdNot(
-                        message.getDoctorId(),
-                        message.getAppointmentDate(),
-                        message.getAppointmentTime(),
-                        message.getId())
-                : appointmentRepository.existsByDoctorIdAndAppointmentDateAndAppointmentTime(
-                        message.getDoctorId(),
-                        message.getAppointmentDate(),
-                        message.getAppointmentTime());
+    // Revisa que el medico no tenga otra cita ACTIVA (no cancelada) a esa fecha y hora.
+    // excludedAppointmentId es la propia cita cuando se actualiza o reactiva; null al crear.
+    private void validateDoctorAvailability(final UUID doctorId, final LocalDate date, final LocalTime time,
+                                            final UUID excludedAppointmentId) {
+        final boolean scheduleTaken = excludedAppointmentId == null
+                ? appointmentRepository.existsByDoctorIdAndAppointmentDateAndAppointmentTimeAndStatusNot(
+                        doctorId, date, time, CANCELLED_STATUS)
+                : appointmentRepository.existsByDoctorIdAndAppointmentDateAndAppointmentTimeAndIdNotAndStatusNot(
+                        doctorId, date, time, excludedAppointmentId, CANCELLED_STATUS);
 
         if (scheduleTaken) {
             throw new IllegalArgumentException("El medico ya tiene una cita programada para esa fecha y hora");
