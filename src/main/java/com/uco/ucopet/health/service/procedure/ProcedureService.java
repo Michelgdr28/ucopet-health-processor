@@ -1,7 +1,7 @@
 package com.uco.ucopet.health.service.procedure;
 
 import com.uco.ucopet.health.domain.procedure.ProcedureDomain;
-import com.uco.ucopet.health.domain.procedure.ProcedureProductDomain;
+import com.uco.ucopet.health.domain.procedure.ProcedureItemDomain;
 import com.uco.ucopet.health.repository.procedure.IProcedureRepository;
 import com.uco.ucopet.health.repository.space.ISpaceRepository;
 import org.slf4j.Logger;
@@ -72,11 +72,11 @@ public class ProcedureService {
                 "La descripción no puede superar los 500 caracteres", MAX_DESCRIPTION_LENGTH);
         validateDuration(message.getDurationMinutes());
         validateSpaceIsActive(message.getSpaceId());
-        final List<ProcedureProductDomain> products = validateProducts(message.getDefaultProducts());
+        final List<ProcedureItemDomain> items = validateItems(message.getDefaultItems());
         final String code = resolveCode(message.getCode(), null);
 
         procedureRepository.save(new ProcedureDomain(message.getId(), code, type, description,
-                message.getDurationMinutes(), message.getSpaceId(), products, true));
+                message.getDurationMinutes(), message.getSpaceId(), items, true));
         log.info("[PROCEDURE] creado id={} code={}", message.getId(), code);
     }
 
@@ -97,8 +97,8 @@ public class ProcedureService {
             validateSpaceIsActive(changes.getSpaceId());
             procedure.setSpaceId(changes.getSpaceId());
         }
-        if (!changes.getDefaultProducts().isEmpty()) {
-            procedure.setDefaultProducts(validateProducts(changes.getDefaultProducts()));
+        if (!changes.getDefaultItems().isEmpty()) {
+            procedure.setDefaultItems(validateItems(changes.getDefaultItems()));
         }
 
         final String requestedCode = normalizeCode(changes.getCode());
@@ -209,30 +209,32 @@ public class ProcedureService {
         }
     }
 
-
-    private List<ProcedureProductDomain> validateProducts(final List<ProcedureProductDomain> products) {
-        if (products == null || products.isEmpty()) {
-            throw new IllegalArgumentException("Debes asociar al menos un producto predeterminado");
+    private List<ProcedureItemDomain> validateItems(final List<ProcedureItemDomain> items) {
+        if (items == null || items.isEmpty()) {
+            throw new IllegalArgumentException("Debes asociar al menos un producto o servicio predeterminado");
         }
-        final Set<UUID> productIds = new HashSet<>();
-        final List<ProcedureProductDomain> validated = new ArrayList<>();
-        for (ProcedureProductDomain product : products) {
-            if (product == null) {
-                throw new IllegalArgumentException("La información del producto predeterminado es obligatoria");
+        final Set<UUID> itemIds = new HashSet<>();
+        final List<ProcedureItemDomain> validated = new ArrayList<>();
+        for (ProcedureItemDomain item : items) {
+            if (item == null) {
+                throw new IllegalArgumentException(
+                        "La información del producto o servicio predeterminado es obligatoria");
             }
-            if (product.getProductId() == null) {
-                throw new IllegalArgumentException("El identificador del producto predeterminado es obligatorio");
+            if (item.getItemId() == null) {
+                throw new IllegalArgumentException(
+                        "El identificador del producto o servicio predeterminado es obligatorio");
             }
-            if (product.getQuantity() == null) {
+            if (item.getQuantity() == null) {
                 throw new IllegalArgumentException("La cantidad es obligatoria");
             }
-            if (product.getQuantity() <= 0) {
+            if (item.getQuantity() <= 0) {
                 throw new IllegalArgumentException("La cantidad debe ser mayor que cero");
             }
-            if (!productIds.add(product.getProductId())) {
-                throw new IllegalArgumentException("Un producto predeterminado solo puede asociarse una vez");
+            if (!itemIds.add(item.getItemId())) {
+                throw new IllegalArgumentException(
+                        "Un producto o servicio predeterminado solo puede asociarse una vez");
             }
-            validated.add(new ProcedureProductDomain(product.getProductId(), product.getQuantity()));
+            validated.add(new ProcedureItemDomain(item.getItemId(), item.getQuantity()));
         }
         return validated;
     }
