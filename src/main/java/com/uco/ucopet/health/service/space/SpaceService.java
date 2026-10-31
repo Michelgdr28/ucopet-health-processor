@@ -76,14 +76,16 @@ public class SpaceService {
             throw new IllegalArgumentException("El código del espacio ya existe en el sistema.");
         }
 
+        UUID headquarterId = validateHeadquarter(message.getHeadquarterId());
+
         Boolean active = Optional.ofNullable(message.getActive()).orElse(true);
 
-        spaceRepository.save(new SpaceDomain(message.getId(), code, type, description, active));
+        spaceRepository.save(new SpaceDomain(message.getId(), code, type, description, active, headquarterId));
         log.info("[SPACE] creado id={} code={}", message.getId(), code);
     }
 
     // Solo se aplican los campos que vienen (los null significan "sin cambio").
-    // El code no se modifica: es el identificador de negocio.
+    // El code no se modifica: es el identificador de negocio. Tampoco la sede: un espacio no cambia de sede.
     private void updateSpace(SpaceDomain space, SpaceDomain changes) {
         if (changes.getType() != null) {
             space.setType(validateType(changes.getType().trim()));
@@ -97,6 +99,15 @@ public class SpaceService {
 
         spaceRepository.save(space);
         log.info("[SPACE] actualizado id={}", space.getId());
+    }
+
+    // La sede es obligatoria al crear. Aqui solo se exige que venga: que exista y este activa lo valida la API
+    // antes de publicar, porque las sedes son del procesador de Inventario y no se replican en Salud.
+    private UUID validateHeadquarter(UUID headquarterId) {
+        if (headquarterId == null) {
+            throw new IllegalArgumentException("La sede es obligatoria.");
+        }
+        return headquarterId;
     }
 
     private String trimmed(String value) {
@@ -117,4 +128,5 @@ public class SpaceService {
         return description;
     }
 }
+
 
