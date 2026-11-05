@@ -75,7 +75,7 @@ public class AppointmentService {
         final Optional<AppointmentDomain> existing = appointmentRepository.findById(incoming.getId());
         final String previousStatus = existing.map(AppointmentDomain::getStatus).orElse(null);
 
-        validateSchedule(incoming);
+        validateSchedule(incoming, existing.orElse(null));
         final String status = validateStatusRules(incoming.getStatus(), incoming.getCancellationReason(),
                 previousStatus);
         validateRelationships(incoming);
@@ -132,15 +132,24 @@ public class AppointmentService {
                 : null);
     }
 
-    private void validateSchedule(final AppointmentDomain appointment) {
+    // Aqui solo se revisa la FECHA, no la hora del dia: la API ya valido la hora cuando el usuario la pidio, y
+    // el mensaje puede esperar en la cola (por ejemplo con el procesador apagado). Si se comparara contra la
+    // hora de este momento, una cita valida se rechazaria solo por haber tardado en procesarse.
+    // Si la cita ya existe y conserva su fecha y hora, tampoco se exige que sea futura.
+    private void validateSchedule(final AppointmentDomain appointment, final AppointmentDomain stored) {
         if (appointment.getAppointmentDate() == null) {
             throw new IllegalArgumentException("La fecha de la cita es obligatoria");
         }
-        if (appointment.getAppointmentDate().isBefore(LocalDate.now(APPLICATION_ZONE_ID))) {
-            throw new IllegalArgumentException("La fecha de la cita no puede estar en el pasado");
-        }
         if (appointment.getAppointmentTime() == null) {
             throw new IllegalArgumentException("La hora de la cita es obligatoria");
+        }
+        if (stored != null
+                && appointment.getAppointmentDate().equals(stored.getAppointmentDate())
+                && appointment.getAppointmentTime().equals(stored.getAppointmentTime())) {
+            return;
+        }
+        if (appointment.getAppointmentDate().isBefore(LocalDate.now(APPLICATION_ZONE_ID))) {
+            throw new IllegalArgumentException("La fecha de la cita no puede estar en el pasado");
         }
     }
 

@@ -309,6 +309,43 @@ class AppointmentServiceTest {
                 () -> appointmentService.changeAppointmentStatus(null, "CONFIRMED", null));
     }
 
+    @Test
+    void saveAppointment_updateKeepingItsScheduleAcceptsAnAlreadyPastDate() {
+        final AppointmentDomain incoming = validAppointment();
+        incoming.setAppointmentDate(LocalDate.now().minusDays(1));
+        givenValidReferences(incoming);
+
+        final AppointmentDomain existing = new AppointmentDomain();
+        existing.setId(incoming.getId());
+        existing.setStatus("PENDING");
+        existing.setAppointmentDate(incoming.getAppointmentDate());
+        existing.setAppointmentTime(incoming.getAppointmentTime());
+        when(appointmentRepository.findById(incoming.getId())).thenReturn(Optional.of(existing));
+
+        appointmentService.saveAppointment(incoming);
+
+        verify(appointmentRepository).save(existing);
+    }
+
+    @Test
+    void saveAppointment_updateMovingToAPastDateIsRejected() {
+        final AppointmentDomain incoming = validAppointment();
+        incoming.setAppointmentDate(LocalDate.now().minusDays(1));
+        givenValidReferences(incoming);
+
+        final AppointmentDomain existing = new AppointmentDomain();
+        existing.setId(incoming.getId());
+        existing.setStatus("PENDING");
+        existing.setAppointmentDate(LocalDate.now().plusDays(3));
+        existing.setAppointmentTime(incoming.getAppointmentTime());
+        when(appointmentRepository.findById(incoming.getId())).thenReturn(Optional.of(existing));
+
+        final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> appointmentService.saveAppointment(incoming));
+        assertTrue(error.getMessage().contains("pasado"));
+        verify(appointmentRepository, never()).save(any());
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private AppointmentDomain validAppointment() {
