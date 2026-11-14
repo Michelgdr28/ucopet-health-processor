@@ -24,4 +24,17 @@ public interface IAppointmentRepository extends JpaRepository<AppointmentDomain,
                                                                                      LocalTime appointmentTime,
                                                                                      UUID id,
                                                                                      String status);
+
+    // Lo mismo para la MASCOTA: no puede tener dos citas activas a la misma fecha y hora,
+    // aunque sean con medicos distintos.
+    boolean existsByPetIdAndAppointmentDateAndAppointmentTimeAndStatusNot(UUID petId,
+                                                                          LocalDate appointmentDate,
+                                                                          LocalTime appointmentTime,
+                                                                          String status);
+
+    boolean existsByPetIdAndAppointmentDateAndAppointmentTimeAndIdNotAndStatusNot(UUID petId,
+                                                                                  LocalDate appointmentDate,
+                                                                                  LocalTime appointmentTime,
+                                                                                  UUID id,
+                                                                                  String status);
 }

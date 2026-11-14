@@ -74,15 +74,22 @@ public class AppointmentService {
 
         final Optional<AppointmentDomain> existing = appointmentRepository.findById(incoming.getId());
         final String previousStatus = existing.map(AppointmentDomain::getStatus).orElse(null);
+        // Una cita completada ya se atendio: queda como historial y no se vuelve a editar.
+        if (COMPLETED_STATUS.equalsIgnoreCase(previousStatus)) {
+            throw new IllegalArgumentException("Una cita completada no se puede modificar");
+        }
 
         validateSchedule(incoming, existing.orElse(null));
         final String status = validateStatusRules(incoming.getStatus(), incoming.getCancellationReason(),
                 previousStatus);
         validateRelationships(incoming);
-        // Una cita cancelada no ocupa el horario del medico, asi que no compite por el.
+        // Una cita cancelada no ocupa el horario del medico ni de la mascota, asi que no compite por el.
         if (!CANCELLED_STATUS.equals(status)) {
+            final UUID excludedId = existing.isPresent() ? incoming.getId() : null;
             validateDoctorAvailability(incoming.getDoctorId(), incoming.getAppointmentDate(),
-                    incoming.getAppointmentTime(), existing.isPresent() ? incoming.getId() : null);
+                    incoming.getAppointmentTime(), excludedId);
+            validatePetAvailability(incoming.getPetId(), incoming.getAppointmentDate(),
+                    incoming.getAppointmentTime(), excludedId);
         }
 
         final AppointmentDomain appointment = existing.orElseGet(AppointmentDomain::new);
@@ -103,10 +110,15 @@ public class AppointmentService {
 
         final String previousStatus = appointment.getStatus();
         final String normalizedStatus = validateStatusRules(status, cancellationReason, previousStatus);
+        if (COMPLETED_STATUS.equalsIgnoreCase(previousStatus) && !COMPLETED_STATUS.equals(normalizedStatus)) {
+            throw new IllegalArgumentException("Una cita completada no puede cambiar de estado");
+        }
 
         // Si la cita estaba cancelada su horario pudo ser tomado por otra: al reactivarla se revisa de nuevo.
         if (CANCELLED_STATUS.equals(previousStatus) && !CANCELLED_STATUS.equals(normalizedStatus)) {
             validateDoctorAvailability(appointment.getDoctorId(), appointment.getAppointmentDate(),
+                    appointment.getAppointmentTime(), appointment.getId());
+            validatePetAvailability(appointment.getPetId(), appointment.getAppointmentDate(),
                     appointment.getAppointmentTime(), appointment.getId());
         }
 
@@ -239,6 +251,20 @@ public class AppointmentService {
 
         if (scheduleTaken) {
             throw new IllegalArgumentException("El medico ya tiene una cita programada para esa fecha y hora");
+        }
+    }
+
+    // Igual que la del medico, pero para la mascota: una mascota no puede estar en dos citas a la vez.
+    private void validatePetAvailability(final UUID petId, final LocalDate date, final LocalTime time,
+                                         final UUID excludedAppointmentId) {
+        final boolean scheduleTaken = excludedAppointmentId == null
+                ? appointmentRepository.existsByPetIdAndAppointmentDateAndAppointmentTimeAndStatusNot(
+                        petId, date, time, CANCELLED_STATUS)
+                : appointmentRepository.existsByPetIdAndAppointmentDateAndAppointmentTimeAndIdNotAndStatusNot(
+                        petId, date, time, excludedAppointmentId, CANCELLED_STATUS);
+
+        if (scheduleTaken) {
+            throw new IllegalArgumentException("La mascota ya tiene una cita programada para esa fecha y hora");
         }
     }
 }

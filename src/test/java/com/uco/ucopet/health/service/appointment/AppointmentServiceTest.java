@@ -172,6 +172,36 @@ class AppointmentServiceTest {
     }
 
     @Test
+    void saveAppointment_rejectsPetScheduleConflict() {
+        // La mascota no puede tener dos citas activas a la misma hora, ni con medicos distintos
+        final AppointmentDomain incoming = validAppointment();
+        givenValidReferences(incoming);
+        when(appointmentRepository.existsByPetIdAndAppointmentDateAndAppointmentTimeAndStatusNot(
+                incoming.getPetId(), incoming.getAppointmentDate(), incoming.getAppointmentTime(), "CANCELLED"))
+                .thenReturn(true);
+
+        final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> appointmentService.saveAppointment(incoming));
+        assertTrue(error.getMessage().contains("La mascota ya tiene una cita"));
+        verify(appointmentRepository, never()).save(any());
+    }
+
+    @Test
+    void saveAppointment_rejectsEditingACompletedAppointment() {
+        final AppointmentDomain incoming = validAppointment();
+        givenValidReferences(incoming);
+        final AppointmentDomain existing = new AppointmentDomain();
+        existing.setId(incoming.getId());
+        existing.setStatus("COMPLETED");
+        when(appointmentRepository.findById(incoming.getId())).thenReturn(Optional.of(existing));
+
+        final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> appointmentService.saveAppointment(incoming));
+        assertTrue(error.getMessage().contains("completada"));
+        verify(appointmentRepository, never()).save(any());
+    }
+
+    @Test
     void saveAppointment_cancelledAppointmentDoesNotCompeteForTheSchedule() {
         // El horario aparece "ocupado", pero una cita que llega CANCELADA no ocupa nada
         final AppointmentDomain incoming = validAppointment();
@@ -262,6 +292,37 @@ class AppointmentServiceTest {
         assertTrue(error.getMessage().contains("ya tiene una cita"));
         verify(appointmentRepository, never()).save(any());
         assertEquals("CANCELLED", existing.getStatus());
+    }
+
+    @Test
+    void changeAppointmentStatus_reactivatingChecksThePetScheduleAgain() {
+        final AppointmentDomain existing = cancelledAppointment();
+        existing.setPetId(UUID.randomUUID());
+        when(appointmentRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(appointmentRepository.existsByPetIdAndAppointmentDateAndAppointmentTimeAndIdNotAndStatusNot(
+                existing.getPetId(), existing.getAppointmentDate(), existing.getAppointmentTime(),
+                existing.getId(), "CANCELLED"))
+                .thenReturn(true);
+
+        final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> appointmentService.changeAppointmentStatus(existing.getId(), "PENDING", null));
+
+        assertTrue(error.getMessage().contains("La mascota ya tiene una cita"));
+        verify(appointmentRepository, never()).save(any());
+    }
+
+    @Test
+    void changeAppointmentStatus_aCompletedAppointmentCannotChangeStatus() {
+        final UUID id = UUID.randomUUID();
+        final AppointmentDomain existing = new AppointmentDomain();
+        existing.setId(id);
+        existing.setStatus("COMPLETED");
+        when(appointmentRepository.findById(id)).thenReturn(Optional.of(existing));
+
+        final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> appointmentService.changeAppointmentStatus(id, "PENDING", null));
+        assertTrue(error.getMessage().contains("completada"));
+        verify(appointmentRepository, never()).save(any());
     }
 
     @Test
